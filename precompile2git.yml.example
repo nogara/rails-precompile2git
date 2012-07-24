@@ -5,3 +5,5 @@ precompile2git:
   user_email: team@fre.sc
   rails_env: production
   commands_log_file: "/dev/null"
+  tddium_cc_url: "https://api.tddium.com/cc/387h2d9h2398d32/cctray.xml"
+  tddium_suite: "projectname (master)"

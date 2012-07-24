@@ -3,6 +3,8 @@ require 'git'
 require 'logger'
 require 'process'
 require 'yaml'
+require 'nokogiri'
+require 'httparty'
 
 
 class Precompile2git
@@ -39,19 +41,22 @@ class Precompile2git
       @logger.error("Could not push changes. Git error: " + e.inspect)
     end
 
-    
+
   end
 
 
   # Run the first precompilation task and starts watching a git repo for any update
   def start
+
+    @last_build_label = 0
+
     @logger.info("Syncing repo.")
 
     sync_and_merge
 
-    @logger.info("Syncing done, running first precompilation.")
+    # @logger.info("Syncing done, running first precompilation.")
 
-    precompile
+    # precompile
 
     @logger.info("Precompilation process started, start watching.")
 
@@ -103,7 +108,7 @@ class Precompile2git
   # Makes sure that each branch is the mirror of origin, to prevent any merging issue
   def sync_with_origin( branch_name )
     locals = @g.branches.local.map{ |b| b.to_s }
-    
+
     @g.reset_hard
 
     if locals.include?(branch_name)
@@ -111,7 +116,7 @@ class Precompile2git
     else
       @g.checkout("origin/" + branch_name, { :new_branch => branch_name } )
     end
-    
+
     @g.reset_hard("origin/" + branch_name)
     @g.pull("origin", branch_name)
   end
@@ -122,7 +127,7 @@ class Precompile2git
   def sync_and_merge
     sync_with_origin(@uncompiled_branch)
     sync_with_origin(@compiled_branch)
-    
+
     @g.merge(@uncompiled_branch, nil)
   end
 
@@ -164,17 +169,69 @@ class Precompile2git
     end
   end
 
+  def tddium_status
+
+    xml = HTTParty.get(@tddium_cc_url).body
+    doc = Nokogiri::Slop(xml)
+
+    td_status = doc.Projects.Project("[@name='#{@tddium_suite}']")
+
+    status = {
+      build_label: td_status.attributes['lastBuildLabel'].value,
+      build_status: td_status.attributes['lastBuildStatus'].value,
+      activity: td_status.attributes['activity'].value
+    }
+  end
+
   # Watch at a given interval if the repo has been updated.
   # If so, any running rake task should be killed and a new one should be launched
   def watch_repo(interval)
+
     Thread.new do
       loop do
         start_time = Time.now
 
         begin
+
+          status = tddium_status
+          puts "Tddium mlearning (master) - build: #{status[:build_label]}, last_build: #{status[:build_status]}, activity: #{status[:activity]}"
+
           up_to_date = up_to_date?
 
-          unless up_to_date
+          go_ahead = false
+
+          #check tddium
+          if up_to_date == false
+            #give tddium a few seconds to start building...
+
+            if @last_build_label == 0
+              #first run
+              puts "Waiting a little bit for tddium to start the build"
+              sleep 30
+            end
+
+            status = tddium_status
+
+            puts "Tddium mlearning (master) - build: #{status[:build_label]}, last_build: #{status[:build_status]}, activity: #{status[:activity]}"
+
+            while status[:activity] == "Building" or status[:build_label].to_i <= @last_build_label
+              puts "still building, sleep 10 seconds"
+              sleep 10
+              status = tddium_status
+              puts "Tddium mlearning (master) - build: #{status[:build_label]}, last_build: #{status[:build_status]}, activity: #{status[:activity]}"
+            end
+
+            @last_build_label = status[:build_label].to_i
+            if status[:build_status] == "Success"
+              puts "Go ahead!"
+              go_ahead = true
+            else
+              puts "No good... try again next time"
+              go_ahead = false
+            end
+          end
+
+          if up_to_date == false and go_ahead == true
 
             assets_changed = assets_changed?
 
