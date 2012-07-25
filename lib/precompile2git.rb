@@ -84,7 +84,7 @@ class Precompile2git
         end
       end
 
-  
+
       @precompilation_process_pid = fork do
         @logger.info("Precompiler: Starting assets precompilation...")
 
@@ -254,6 +254,8 @@ class Precompile2git
 
         rescue Git::GitExecuteError => e
           @logger.error("Something went wrong with Git : " + e.to_s)
+        rescue Exception => e
+          @logger.error("Something is wrong, ignoring it: " + e.to_s)
         end
 
         elapsed = Time.now - start_time
